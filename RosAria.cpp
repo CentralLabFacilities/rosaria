@@ -15,6 +15,7 @@
 #include "nav_msgs/Odometry.h"
 #include "rosaria/BumperState.h"
 #include "tf/tf.h"
+#include <tf2/LinearMath/Quaternion.h> 
 #include "tf/transform_listener.h"  //for tf::getPrefixParam
 #include <tf/transform_broadcaster.h>
 #include "tf/transform_datatypes.h"
@@ -49,7 +50,7 @@ class RosAriaNode
     void sonarConnectCb();
     void dynamic_reconfigureCB(rosaria::RosAriaConfig &config, uint32_t level);
     void readParameters();
-
+    void delta_heading_cb(const geometry_msgs::PoseConstPtr &);
   protected:
     ros::NodeHandle n;
     ros::Publisher pose_pub;
@@ -66,8 +67,10 @@ class RosAriaNode
     ros::Publisher motors_state_pub;
     std_msgs::Bool motors_state;
     bool published_motors_state;
+    bool moving;
 
     ros::Subscriber cmdvel_sub;
+    ros::Subscriber     delta_heading_sub;
 
     ros::ServiceServer enable_srv;
     ros::ServiceServer disable_srv;
@@ -260,6 +263,7 @@ RosAriaNode::RosAriaNode(ros::NodeHandle nh) :
   myPublishCB(this, &RosAriaNode::publish), serial_port(""), serial_baud(0),
   sonar_enabled(false), publish_sonar(false), publish_sonar_pointcloud2(false)
 {
+  moving = false;
   // read in runtime parameters
   n = nh;
 
@@ -315,6 +319,8 @@ RosAriaNode::RosAriaNode(ros::NodeHandle nh) :
   // subscribe to services
   cmdvel_sub = n.subscribe( "cmd_vel", 1, (boost::function <void(const geometry_msgs::TwistConstPtr&)>)
     boost::bind(&RosAriaNode::cmdvel_cb, this, _1 ));
+  delta_heading_sub = n.subscribe( "delta_heading_cb", 1, (boost::function <void(const geometry_msgs::PoseConstPtr&)>)
+    boost::bind(&RosAriaNode::delta_heading_cb, this, _1 ));
 
   // advertise enable/disable services
   enable_srv = n.advertiseService("enable_motors", &RosAriaNode::enable_motors_cb, this);
@@ -681,6 +687,17 @@ RosAriaNode::cmdvel_cb( const geometry_msgs::TwistConstPtr &msg)
     (double) msg->linear.x * 1e3, (double) msg->linear.y * 1.3, (double) msg->angular.z * 180/M_PI);
 }
 
+void RosAriaNode::delta_heading_cb(const geometry_msgs::PoseConstPtr& request)
+{
+  tfScalar roll, pitch, yaw;
+  tf::Quaternion q = tf::Quaternion(request->orientation.x, request->orientation.y, request->orientation.z, request->orientation.w);
+  tf::Matrix3x3(q).getEulerYPR(yaw, pitch, roll);
+  ROS_INFO("turning around pitch [%0.2f,%0.2f,%0.2f] (roll,pitch,yaw)",roll,pitch,yaw);
+  robot->lock();
+  robot->setDeltaHeading(90.0);
+  robot->unlock();
+  ROS_INFO("call finished");
+}
 
 int main( int argc, char** argv )
 {
